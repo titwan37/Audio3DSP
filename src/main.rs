@@ -9,7 +9,7 @@
 //                                                              ↓
 //                                                   [Atomic Shared Params & RMS]
 //                                                              ↓
-//                                                    [Ratatui TUI Mix Console]
+//                                                [eframe GUI Window / Ratatui TUI]
 //
 // REAL-TIME SAFETY:
 //   - Ring buffer is lock-free SPSC (single-producer, single-consumer).
@@ -18,6 +18,7 @@
 
 mod devices;
 mod dsp;
+mod gui;
 mod shared_state;
 mod tui;
 
@@ -28,6 +29,23 @@ use ringbuf::HeapRb;
 use shared_state::SharedParams;
 
 fn main() -> Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    let use_tui = args.iter().any(|arg| arg == "--tui" || arg == "--cli");
+
+    // Parse requested buffer size from CLI args (e.g., --buffer 1024 or --buffer 2048)
+    let mut requested_buffer_size: u32 = 1024; // Default to 1024 frames (~21ms at 48kHz) to prevent trembling/crackles
+    for i in 0..args.len() {
+        if (args[i] == "--buffer" || args[i] == "-b") && i + 1 < args.len() {
+            if let Ok(val) = args[i + 1].parse::<u32>() {
+                requested_buffer_size = val;
+            }
+        } else if args[i].starts_with("--buffer=") {
+            if let Ok(val) = args[i]["--buffer=".len()..].parse::<u32>() {
+                requested_buffer_size = val;
+            }
+        }
+    }
+
     // ── Step 1: Initialize the platform audio host ──
     let host = cpal::default_host();
 
@@ -35,7 +53,7 @@ fn main() -> Result<()> {
     let (input_device, output_device) = devices::find_devices(&host)?;
 
     // ── Step 3: Negotiate a common stream configuration ──
-    let config = devices::negotiate_config(&input_device, &output_device)?;
+    let config = devices::negotiate_config(&input_device, &output_device, Some(requested_buffer_size))?;
     let sample_rate = config.sample_rate;
 
     // ── Step 4: Create lock-free shared state for UI ↔ Audio thread parameter sync & RMS metering ──
@@ -43,7 +61,6 @@ fn main() -> Result<()> {
     let audio_shared_params = shared_params.clone();
 
     // ── Step 5: Create the lock-free ring buffer ──
-    // Size: ~1 second of stereo audio (sample_rate * 2 channels).
     let ring_size = (sample_rate as usize) * 2;
     let ring = HeapRb::<f32>::new(ring_size);
     let (mut producer, mut consumer) = ring.split();
@@ -74,32 +91,28 @@ fn main() -> Result<()> {
                 dsp_chain.set_side_gain(audio_shared_params.get_side_gain());
                 dsp_chain.set_haas_delay_ms(audio_shared_params.get_haas_delay_ms());
                 dsp_chain.set_reverb_wet(audio_shared_params.get_reverb_wet());
+                dsp_chain.set_emboss_gain_db(audio_shared_params.get_emboss_gain_db());
 
                 let mut sum_sq_l = 0.0f32;
                 let mut sum_sq_r = 0.0f32;
                 let mut frame_count = 0usize;
 
-                // Process stereo frames (2 samples per frame: L, R)
                 for frame in data.chunks_mut(2) {
                     let left_in = consumer.try_pop().unwrap_or(0.0);
                     let right_in = consumer.try_pop().unwrap_or(0.0);
 
-                    // Run through the full DSP pipeline
                     let (left_out, right_out) = dsp_chain.process_frame(left_in, right_in);
 
-                    // Accumulate energy for RMS calculation
                     sum_sq_l += left_out * left_out;
                     sum_sq_r += right_out * right_out;
                     frame_count += 1;
 
-                    // Write processed samples to the output buffer
                     frame[0] = left_out;
                     if frame.len() > 1 {
                         frame[1] = right_out;
                     }
                 }
 
-                // Compute RMS levels for live VU meter rendering
                 if frame_count > 0 {
                     let rms_l = (sum_sq_l / frame_count as f32).sqrt();
                     let rms_r = (sum_sq_r / frame_count as f32).sqrt();
@@ -117,10 +130,29 @@ fn main() -> Result<()> {
     input_stream.play().context("Failed to start input stream")?;
     output_stream.play().context("Failed to start output stream")?;
 
-    // ── Step 10: Run the interactive Soundstudio TUI Mix Console on the main thread ──
-    let mut app = tui::TuiApp::new(shared_params);
-    app.run()?;
+    // ── Step 10: Dispatch UI loop based on CLI arguments ──
+    if use_tui {
+        println!("[main] Running Terminal TUI Console (Mode: CLI)...");
+        let mut app = tui::TuiApp::new(shared_params);
+        app.run()?;
+    } else {
+        println!("[main] Launching eframe Hardware Studio GUI window...");
+        let native_options = eframe::NativeOptions {
+            viewport: eframe::egui::ViewportBuilder::default()
+                .with_title("Audio3DSP — Hardware Studio Console")
+                .with_inner_size([960.0, 540.0])
+                .with_min_inner_size([640.0, 360.0]), // Set this to the smallest size you want to allow
+            ..Default::default()
+        };
 
-    // Audio streams stop when input_stream and output_stream are dropped here
+        let gui_shared_params = shared_params.clone();
+        eframe::run_native(
+            "Audio3DSP — Hardware Studio Console",
+            native_options,
+            Box::new(move |_cc| Ok(Box::new(gui::GuiApp::new(gui_shared_params)))),
+        )
+        .map_err(|e| anyhow::anyhow!("eframe window error: {}", e))?;
+    }
+
     Ok(())
 }

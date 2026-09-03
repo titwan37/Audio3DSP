@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result, bail};
 use cpal::traits::{DeviceTrait, HostTrait};
-use cpal::{Device, Host, StreamConfig, BufferSize};
+use cpal::{BufferSize, Device, Host, StreamConfig};
 
 /// Default name fragments used to match input and output devices.
 const INPUT_MATCH_FRAGMENTS: &[&str] = &["CABLE Output", "CABLE"];
@@ -14,9 +14,6 @@ const OUTPUT_MATCH_FRAGMENTS: &[&str] = &["Headphones", "Speakers"];
 
 /// Preferred sample rates, in order of priority.
 const PREFERRED_SAMPLE_RATES: &[u32] = &[44100, 48000, 96000];
-
-/// Preferred buffer sizes in frames, in order of priority (smallest first for lowest latency).
-const PREFERRED_BUFFER_SIZES: &[u32] = &[512, 1024, 2048];
 
 /// Get the human-readable name from a device, falling back to "<unknown>" on error.
 fn device_name(device: &Device) -> String {
@@ -45,8 +42,14 @@ pub fn find_devices(host: &Host) -> Result<(Device, Device)> {
         let name = device_name(&device);
         device_names.push(name.clone());
 
-        let has_input = device.supported_input_configs().map(|mut i| i.next().is_some()).unwrap_or(false);
-        let has_output = device.supported_output_configs().map(|mut i| i.next().is_some()).unwrap_or(false);
+        let has_input = device
+            .supported_input_configs()
+            .map(|mut i| i.next().is_some())
+            .unwrap_or(false);
+        let has_output = device
+            .supported_output_configs()
+            .map(|mut i| i.next().is_some())
+            .unwrap_or(false);
 
         // Try to match input device first, then output.
         // Each device can only be claimed by one role.
@@ -78,15 +81,13 @@ pub fn find_devices(host: &Host) -> Result<(Device, Device)> {
             bail!(
                 "Could not find a virtual cable input device (looked for {:?}).\n\
                  Available devices:\n{}",
-                INPUT_MATCH_FRAGMENTS,
-                available
+                INPUT_MATCH_FRAGMENTS, available
             );
         }
         bail!(
             "Could not find an output device (looked for {:?}).\n\
              Available devices:\n{}",
-            OUTPUT_MATCH_FRAGMENTS,
-            available
+            OUTPUT_MATCH_FRAGMENTS, available
         );
     }
 
@@ -95,8 +96,13 @@ pub fn find_devices(host: &Host) -> Result<(Device, Device)> {
 
 /// Negotiate a common `StreamConfig` that both the input and output devices support.
 ///
-/// Prefers 44100 Hz, stereo (2 channels), with the smallest viable buffer size.
-pub fn negotiate_config(input: &Device, output: &Device) -> Result<StreamConfig> {
+/// Prefers 44100 Hz / 48000 Hz, stereo (2 channels), with a stable buffer size
+/// (default 1024 frames, ~21ms at 48kHz, configurable to prevent trembling/crackling).
+pub fn negotiate_config(
+    input: &Device,
+    output: &Device,
+    preferred_buffer_size: Option<u32>,
+) -> Result<StreamConfig> {
     // Query supported configs from both devices
     let input_configs: Vec<_> = input
         .supported_input_configs()
@@ -112,16 +118,12 @@ pub fn negotiate_config(input: &Device, output: &Device) -> Result<StreamConfig>
     let sample_rate = find_common_sample_rate(&input_configs, &output_configs)
         .context("No common sample rate found between input and output devices")?;
 
-    // Find best buffer size
-    let buffer_size = find_best_buffer_size(&input_configs, &output_configs);
+    let buffer_size = preferred_buffer_size.unwrap_or(1024);
 
     let config = StreamConfig {
         channels: 2,
         sample_rate,
-        buffer_size: match buffer_size {
-            Some(size) => BufferSize::Fixed(size),
-            None => BufferSize::Default,
-        },
+        buffer_size: BufferSize::Fixed(buffer_size),
     };
 
     println!(
@@ -138,33 +140,16 @@ fn find_common_sample_rate(
     output_configs: &[cpal::SupportedStreamConfigRange],
 ) -> Option<u32> {
     for &rate in PREFERRED_SAMPLE_RATES {
-        let input_ok = input_configs
-            .iter()
-            .any(|c| c.min_sample_rate() <= rate && rate <= c.max_sample_rate() && c.channels() >= 2);
-        let output_ok = output_configs
-            .iter()
-            .any(|c| c.min_sample_rate() <= rate && rate <= c.max_sample_rate() && c.channels() >= 2);
+        let input_ok = input_configs.iter().any(|c| {
+            c.min_sample_rate() <= rate && rate <= c.max_sample_rate() && c.channels() >= 2
+        });
+        let output_ok = output_configs.iter().any(|c| {
+            c.min_sample_rate() <= rate && rate <= c.max_sample_rate() && c.channels() >= 2
+        });
 
         if input_ok && output_ok {
             return Some(rate);
         }
     }
     None
-}
-
-/// Try to find the smallest preferred buffer size. Returns None if we should use default.
-fn find_best_buffer_size(
-    _input_configs: &[cpal::SupportedStreamConfigRange],
-    _output_configs: &[cpal::SupportedStreamConfigRange],
-) -> Option<u32> {
-    // cpal's SupportedStreamConfigRange doesn't expose buffer size limits directly.
-    // We'll try our preferred sizes and let cpal reject unsupported ones at stream build time.
-    // Start with the smallest for lowest latency.
-    Some(PREFERRED_BUFFER_SIZES[0])
-}
-
-#[cfg(test)]
-mod tests {
-    // Device discovery tests require real audio hardware and are therefore
-    // manual integration tests rather than unit tests.
 }

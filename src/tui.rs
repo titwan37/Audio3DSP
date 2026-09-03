@@ -29,6 +29,7 @@ pub enum ActiveSlider {
     StereoWidth = 0,
     HaasDelay = 1,
     ReverbWet = 2,
+    VocalEmboss = 3,
 }
 
 impl ActiveSlider {
@@ -36,15 +37,17 @@ impl ActiveSlider {
         match self {
             Self::StereoWidth => Self::HaasDelay,
             Self::HaasDelay => Self::ReverbWet,
-            Self::ReverbWet => Self::StereoWidth,
+            Self::ReverbWet => Self::VocalEmboss,
+            Self::VocalEmboss => Self::StereoWidth,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            Self::StereoWidth => Self::ReverbWet,
+            Self::StereoWidth => Self::VocalEmboss,
             Self::HaasDelay => Self::StereoWidth,
             Self::ReverbWet => Self::HaasDelay,
+            Self::VocalEmboss => Self::ReverbWet,
         }
     }
 }
@@ -147,6 +150,11 @@ impl TuiApp {
                 let next = (current + step_direction * 0.05).clamp(0.0, 1.0);
                 self.shared_params.set_reverb_wet(next);
             }
+            ActiveSlider::VocalEmboss => {
+                let current = self.shared_params.get_emboss_gain_db();
+                let next = (current + step_direction * 0.2).clamp(0.0, 6.0);
+                self.shared_params.set_emboss_gain_db(next);
+            }
         }
     }
 
@@ -223,22 +231,24 @@ impl TuiApp {
         let strip_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Ratio(1, 3),
-                Constraint::Ratio(1, 3),
-                Constraint::Ratio(1, 3),
+                Constraint::Ratio(1, 4),
+                Constraint::Ratio(1, 4),
+                Constraint::Ratio(1, 4),
+                Constraint::Ratio(1, 4),
             ])
             .split(area);
 
         let width = self.shared_params.get_side_gain();
         let haas = self.shared_params.get_haas_delay_ms();
         let wet = self.shared_params.get_reverb_wet();
+        let emboss = self.shared_params.get_emboss_gain_db();
 
         // 1. Stereo Width Slider
         self.render_slider(
             frame,
             strip_chunks[0],
             SliderConfig {
-                title: "1: M/S STEREO WIDTH",
+                title: "1: M/S WIDTH",
                 val: width,
                 min: 1.0,
                 max: 3.0,
@@ -253,7 +263,7 @@ impl TuiApp {
             frame,
             strip_chunks[1],
             SliderConfig {
-                title: "2: HAAS DELAY TIME",
+                title: "2: HAAS DELAY",
                 val: haas,
                 min: 0.0,
                 max: 40.0,
@@ -268,13 +278,28 @@ impl TuiApp {
             frame,
             strip_chunks[2],
             SliderConfig {
-                title: "3: REVERB WET MIX",
+                title: "3: REVERB WET",
                 val: wet * 100.0,
                 min: 0.0,
                 max: 100.0,
                 val_str: format!("{:.0}%", wet * 100.0),
                 is_active: self.active_slider == ActiveSlider::ReverbWet,
                 accent_color: Color::Magenta,
+            },
+        );
+
+        // 4. Vocal Emboss Slider
+        self.render_slider(
+            frame,
+            strip_chunks[3],
+            SliderConfig {
+                title: "4: VOCAL EMBOSS",
+                val: emboss,
+                min: 0.0,
+                max: 6.0,
+                val_str: format!("+{:.1} dB", emboss),
+                is_active: self.active_slider == ActiveSlider::VocalEmboss,
+                accent_color: Color::Cyan,
             },
         );
     }

@@ -16,10 +16,12 @@
 ///
 /// A `side_gain` of 1.0 is unity (no change). Values > 1.0 widen the
 /// stereo image; values < 1.0 narrow it toward mono.
+#[allow(dead_code)]
 pub struct MsWidener {
     side_gain: f32,
 }
 
+#[allow(dead_code)]
 impl MsWidener {
     /// Create a new widener with the given side channel gain multiplier.
     ///
