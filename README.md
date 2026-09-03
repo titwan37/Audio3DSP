@@ -133,7 +133,9 @@ The mixing desk features 4 channel strips and stereo VU meters:
 - **Parametric Peaking EQ**: Transposed Direct Form II Biquad Filter centered at $f_0 = 3000\text{ Hz}$ ($Q = 1.0$) providing $+0.0\text{ dB}$ to $+6.0\text{ dB}$ boost in the vocal presence zone.
 - **Harmonic Exciter / Soft Saturator**: Polynomial cubic curve ($y = x - \frac{x^3}{3}$ for $|x| \le 1.0$) adding subtle odd harmonics to give lead vocals definition over dense instrument mixes.
 
-### Real-Time Lock-Free Safety
+### Systems-Level Performance Optimizations
+- **MMCSS Real-Time Thread Priority (`src/main.rs`)**: On startup, `Audio3DSP` invokes Windows `AvSetMmThreadCharacteristicsW("Pro Audio")` via native FFI to elevate the OS thread priority above background processes and prevent scheduler preemptions.
+- **SIMD Hardware Vectorization (`.cargo/config.toml`)**: Configured with `-C target-cpu=native` to allow LLVM to emit AVX2 / FMA SIMD vector instructions, processing multiple audio samples per CPU clock cycle in L1/L2 cache.
 - **Zero Allocations in Callbacks**: All DSP filters, biquads, reverb delay lines, and buffers are pre-allocated at startup.
 - **Thread Synchronization**: Parameter updates between the UI thread and WASAPI audio callback use lock-free atomic float bit-patterns (`AtomicU32` storing `f32::to_bits()`).
 - **Ring Buffer**: Single-Producer Single-Consumer (SPSC) lock-free ring buffer (`ringbuf`) transports incoming audio frames from the capture thread to the playback thread.

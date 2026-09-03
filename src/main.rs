@@ -28,9 +28,39 @@ use ringbuf::traits::{Consumer, Producer, Split};
 use ringbuf::HeapRb;
 use shared_state::SharedParams;
 
+#[cfg(target_os = "windows")]
+mod mmcss {
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "avrt")]
+    extern "system" {
+        fn AvSetMmThreadCharacteristicsW(
+            task_name: *const u16,
+            task_index: *mut u32,
+        ) -> *mut std::ffi::c_void;
+    }
+
+    pub fn set_thread_priority_pro_audio() {
+        let task_name: Vec<u16> = std::ffi::OsStr::new("Pro Audio")
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let mut index = 0u32;
+        unsafe {
+            let handle = AvSetMmThreadCharacteristicsW(task_name.as_ptr(), &mut index);
+            if !handle.is_null() {
+                println!("[mmcss] Windows MMCSS 'Pro Audio' real-time thread priority enabled!");
+            }
+        }
+    }
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let use_tui = args.iter().any(|arg| arg == "--tui" || arg == "--cli");
+
+    #[cfg(target_os = "windows")]
+    mmcss::set_thread_priority_pro_audio();
 
     // Parse requested buffer size from CLI args (e.g., --buffer 1024 or --buffer 2048)
     let mut requested_buffer_size: u32 = 1024; // Default to 1024 frames (~21ms at 48kHz) to prevent trembling/crackles
