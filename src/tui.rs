@@ -52,6 +52,12 @@ impl ActiveSlider {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusElement {
+    Slider,
+    BypassToggle,
+}
+
 struct SliderConfig<'a> {
     title: &'a str,
     val: f32,
@@ -59,12 +65,15 @@ struct SliderConfig<'a> {
     max: f32,
     val_str: String,
     is_active: bool,
+    is_enabled: bool,
+    focus_elem: FocusElement,
     accent_color: Color,
 }
 
 pub struct TuiApp {
     shared_params: Arc<SharedParams>,
     active_slider: ActiveSlider,
+    focus_element: FocusElement,
 }
 
 impl TuiApp {
@@ -72,6 +81,7 @@ impl TuiApp {
         Self {
             shared_params,
             active_slider: ActiveSlider::StereoWidth,
+            focus_element: FocusElement::Slider,
         }
     }
 
@@ -118,11 +128,34 @@ impl TuiApp {
                         KeyCode::Right | KeyCode::Char('l') => {
                             self.active_slider = self.active_slider.next();
                         }
+                        KeyCode::Tab => {
+                            self.focus_element = match self.focus_element {
+                                FocusElement::Slider => FocusElement::BypassToggle,
+                                FocusElement::BypassToggle => FocusElement::Slider,
+                            };
+                        }
+                        KeyCode::Char(' ') | KeyCode::Enter => {
+                            match self.active_slider {
+                                ActiveSlider::StereoWidth => { self.shared_params.toggle_widener(); }
+                                ActiveSlider::HaasDelay   => { self.shared_params.toggle_haas(); }
+                                ActiveSlider::ReverbWet   => { self.shared_params.toggle_reverb(); }
+                                ActiveSlider::VocalEmboss => { self.shared_params.toggle_emboss(); }
+                            }
+                        }
                         KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('+') | KeyCode::Char('=') => {
-                            self.adjust_value(1.0);
+                            if self.focus_element == FocusElement::BypassToggle {
+                                self.focus_element = FocusElement::Slider;
+                            } else {
+                                self.adjust_value(1.0);
+                            }
                         }
                         KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('-') => {
-                            self.adjust_value(-1.0);
+                            if self.focus_element == FocusElement::Slider {
+                                // If already at min or pressing down when focused on slider, allow moving to toggle
+                                self.focus_element = FocusElement::BypassToggle;
+                            } else {
+                                self.adjust_value(-1.0);
+                            }
                         }
                         _ => {}
                     }
@@ -254,6 +287,8 @@ impl TuiApp {
                 max: 3.0,
                 val_str: format!("{:.1}x", width),
                 is_active: self.active_slider == ActiveSlider::StereoWidth,
+                is_enabled: self.shared_params.is_widener_enabled(),
+                focus_elem: self.focus_element,
                 accent_color: Color::Green,
             },
         );
@@ -269,6 +304,8 @@ impl TuiApp {
                 max: 40.0,
                 val_str: format!("{:.0} ms", haas),
                 is_active: self.active_slider == ActiveSlider::HaasDelay,
+                is_enabled: self.shared_params.is_haas_enabled(),
+                focus_elem: self.focus_element,
                 accent_color: Color::Yellow,
             },
         );
@@ -284,6 +321,8 @@ impl TuiApp {
                 max: 100.0,
                 val_str: format!("{:.0}%", wet * 100.0),
                 is_active: self.active_slider == ActiveSlider::ReverbWet,
+                is_enabled: self.shared_params.is_reverb_enabled(),
+                focus_elem: self.focus_element,
                 accent_color: Color::Magenta,
             },
         );
@@ -299,6 +338,8 @@ impl TuiApp {
                 max: 6.0,
                 val_str: format!("+{:.1} dB", emboss),
                 is_active: self.active_slider == ActiveSlider::VocalEmboss,
+                is_enabled: self.shared_params.is_emboss_enabled(),
+                focus_elem: self.focus_element,
                 accent_color: Color::Cyan,
             },
         );
@@ -331,9 +372,10 @@ impl TuiApp {
         let inner_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(2),
-                Constraint::Min(4),
-                Constraint::Length(3),
+                Constraint::Length(2), // Value
+                Constraint::Min(4),    // Potentiometer bar
+                Constraint::Length(3), // ON/OFF Bypass Toggle Switch
+                Constraint::Length(2), // Focus Indicator
             ])
             .split(inner_area);
 
@@ -363,7 +405,7 @@ impl TuiApp {
             Line::from(""),
             Line::from(Span::styled(
                 format!("[ {} ]", slider_bar),
-                Style::default().fg(cfg.accent_color).add_modifier(Modifier::BOLD),
+                Style::default().fg(if cfg.is_enabled { cfg.accent_color } else { Color::DarkGray }).add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
             Line::from(Span::styled(
@@ -375,11 +417,52 @@ impl TuiApp {
         let pot_paragraph = Paragraph::new(pot_lines).alignment(Alignment::Center);
         frame.render_widget(pot_paragraph, inner_chunks[1]);
 
+        // ── Visual ON/OFF Bypass Toggle Indicator Directly Below Slider ──
+        let is_toggle_focused = cfg.is_active && cfg.focus_elem == FocusElement::BypassToggle;
+        let (toggle_badge, badge_color) = if cfg.is_enabled {
+            ("[ ON ]", Color::Green)
+        } else {
+            ("[OFF]", Color::Red)
+        };
+
+        let toggle_style = if is_toggle_focused {
+            Style::default().fg(badge_color).add_modifier(Modifier::BOLD | Modifier::REVERSED)
+        } else {
+            Style::default().fg(badge_color).add_modifier(Modifier::BOLD)
+        };
+
+        let toggle_border_style = if is_toggle_focused {
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+
+        let toggle_p = Paragraph::new(Line::from(vec![
+            Span::styled(toggle_badge, toggle_style),
+            Span::styled(if is_toggle_focused { " ◄Space►" } else { "" }, Style::default().fg(Color::Yellow)),
+        ]))
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(if is_toggle_focused { BorderType::Double } else { BorderType::Plain })
+                .border_style(toggle_border_style)
+                .title(Span::styled(" BYPASS ", Style::default().fg(Color::White).add_modifier(Modifier::DIM))),
+        );
+        frame.render_widget(toggle_p, inner_chunks[2]);
+
         let focus_indicator = if cfg.is_active {
-            Line::from(Span::styled(
-                "◄ ACTIVE KNOB ►",
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-            ))
+            if cfg.focus_elem == FocusElement::BypassToggle {
+                Line::from(Span::styled(
+                    "◄ TOGGLE (Space) ►",
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                ))
+            } else {
+                Line::from(Span::styled(
+                    "◄ ACTIVE KNOB ►",
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                ))
+            }
         } else {
             Line::from(Span::styled(
                 "Press ◄/► to select",
@@ -387,7 +470,7 @@ impl TuiApp {
             ))
         };
         let focus_paragraph = Paragraph::new(focus_indicator).alignment(Alignment::Center);
-        frame.render_widget(focus_paragraph, inner_chunks[2]);
+        frame.render_widget(focus_paragraph, inner_chunks[3]);
     }
 
     /// Render Real-Time Stereo VU Meters (Left / Right RMS)
@@ -461,11 +544,15 @@ impl TuiApp {
         let help_text = vec![Line::from(vec![
             Span::styled(" Controls: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
             Span::styled("[◄ / ► / h / l]", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Span::styled(" Switch Channel  |  ", Style::default().fg(Color::Gray)),
-            Span::styled("[▲ / ▼ / k / j / +/-]", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Span::styled(" Turn Knob  |  ", Style::default().fg(Color::Gray)),
+            Span::styled(" Channel  |  ", Style::default().fg(Color::Gray)),
+            Span::styled("[▲ / ▼ / +/-]", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled(" Knob  |  ", Style::default().fg(Color::Gray)),
+            Span::styled("[Tab / ▲▼]", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(" Select  |  ", Style::default().fg(Color::Gray)),
+            Span::styled("[Space / Enter]", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled(" Bypass ON/OFF  |  ", Style::default().fg(Color::Gray)),
             Span::styled("[q / Esc]", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-            Span::styled(" Quit Console", Style::default().fg(Color::Gray)),
+            Span::styled(" Quit", Style::default().fg(Color::Gray)),
         ])];
 
         let help_widget = Paragraph::new(help_text)

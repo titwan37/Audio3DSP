@@ -123,6 +123,12 @@ fn main() -> Result<()> {
                 dsp_chain.set_reverb_wet(audio_shared_params.get_reverb_wet());
                 dsp_chain.set_emboss_gain_db(audio_shared_params.get_emboss_gain_db());
 
+                // Poll atomic bypass flags (zero allocation, lock-free)
+                dsp_chain.widener_enabled = audio_shared_params.is_widener_enabled();
+                dsp_chain.haas_enabled = audio_shared_params.is_haas_enabled();
+                dsp_chain.reverb_enabled = audio_shared_params.is_reverb_enabled();
+                dsp_chain.emboss_enabled = audio_shared_params.is_emboss_enabled();
+
                 let mut sum_sq_l = 0.0f32;
                 let mut sum_sq_r = 0.0f32;
                 let mut frame_count = 0usize;

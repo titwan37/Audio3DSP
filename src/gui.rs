@@ -142,6 +142,8 @@ impl eframe::App for GuiApp {
                                     "1: M/S WIDTH",
                                     "STEREO WIDENER",
                                     Color32::from_rgb(50, 205, 120),
+                                    self.shared_params.is_widener_enabled(),
+                                    || { self.shared_params.toggle_widener(); },
                                     |ui| {
                                         let mut val = self.shared_params.get_side_gain();
                                         let readout = format!("{:.2}x", val);
@@ -166,6 +168,8 @@ impl eframe::App for GuiApp {
                                     "2: HAAS DELAY",
                                     "TIMING DELAY",
                                     Color32::from_rgb(255, 185, 40),
+                                    self.shared_params.is_haas_enabled(),
+                                    || { self.shared_params.toggle_haas(); },
                                     |ui| {
                                         let mut val = self.shared_params.get_haas_delay_ms();
                                         let readout = format!("{:.1} ms", val);
@@ -190,6 +194,8 @@ impl eframe::App for GuiApp {
                                     "3: SPATIAL REVERB",
                                     "ROOM WET MIX",
                                     Color32::from_rgb(220, 90, 240),
+                                    self.shared_params.is_reverb_enabled(),
+                                    || { self.shared_params.toggle_reverb(); },
                                     |ui| {
                                         let mut val = self.shared_params.get_reverb_wet();
                                         let readout = format!("{:.0}%", val * 100.0);
@@ -214,6 +220,8 @@ impl eframe::App for GuiApp {
                                     "4: VOCAL EMBOSS",
                                     "PRESENCE BOOST",
                                     Color32::from_rgb(0, 200, 255),
+                                    self.shared_params.is_emboss_enabled(),
+                                    || { self.shared_params.toggle_emboss(); },
                                     |ui| {
                                         let mut val = self.shared_params.get_emboss_gain_db();
                                         let readout = format!("+{:.1} dB", val);
@@ -252,9 +260,9 @@ impl eframe::App for GuiApp {
                                 .rounding(Rounding::same(6.0))
                                 .inner_margin(Margin::same(14.0))
                                 .show(ui, |ui| {
-                                    // Match the height of the channel strips (200px)
+                                    // Match the height of the channel strips (230px)
                                     ui.set_width(140.0);
-                                    ui.set_height(200.0);
+                                    ui.set_height(230.0);
 
                                     ui.horizontal(|ui| {
                                         ui.add_space(6.0);
@@ -294,17 +302,19 @@ impl GuiApp {
         title: &str,
         subtitle: &str,
         accent: Color32,
+        is_enabled: bool,
+        on_toggle: impl FnOnce(),
         add_knob: impl FnOnce(&mut egui::Ui),
     ) {
         Frame::none()
             .fill(Color32::from_rgb(28, 32, 40))
             .stroke(Stroke::new(1.0, Color32::from_rgb(50, 55, 68)))
             .rounding(Rounding::same(6.0))
-            .inner_margin(Margin::same(14.0))
+            .inner_margin(Margin::same(12.0))
             .show(ui, |ui| {
-                // Strict fixed width (160px) and height (240px)
-                ui.set_width(100.0);
-                ui.set_height(170.0);
+                // Channel strip fixed size
+                ui.set_width(110.0);
+                ui.set_height(230.0);
                 ui.vertical_centered(|ui| {
                     ui.label(
                         egui::RichText::new(title)
@@ -318,20 +328,45 @@ impl GuiApp {
                             .size(9.0),
                     );
 
-                    ui.add_space(10.0);
+                    ui.add_space(6.0);
                     ui.separator();
-                    ui.add_space(10.0);
+                    ui.add_space(6.0);
 
-                    add_knob(ui);
+                    // Dim the knob slightly if module is bypassed
+                    ui.add_enabled_ui(is_enabled, |ui| {
+                        add_knob(ui);
+                    });
 
-                    ui.add_space(10.0);
-                    ui.separator();
                     ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(6.0);
 
+                    // ── Interactive ON/OFF Bypass Toggle Switch ──
+                    let (toggle_text, text_color, border_color, fill_color) = if is_enabled {
+                        ("[ ON ]", Color32::from_rgb(50, 220, 120), Color32::from_rgb(30, 140, 70), Color32::from_rgb(18, 38, 26))
+                    } else {
+                        ("[OFF]", Color32::from_rgb(220, 70, 70), Color32::from_rgb(120, 40, 40), Color32::from_rgb(38, 20, 20))
+                    };
+
+                    let toggle_btn = egui::Button::new(
+                        egui::RichText::new(toggle_text)
+                            .color(text_color)
+                            .strong()
+                            .size(11.0),
+                    )
+                    .fill(fill_color)
+                    .stroke(Stroke::new(1.5, border_color))
+                    .rounding(Rounding::same(4.0));
+
+                    if ui.add_sized([70.0, 24.0], toggle_btn).clicked() {
+                        on_toggle();
+                    }
+
+                    ui.add_space(4.0);
                     ui.label(
-                        egui::RichText::new("Drag vertical to turn")
-                            .color(Color32::from_rgb(100, 110, 125))
-                            .size(9.0),
+                        egui::RichText::new(if is_enabled { "DSP ACTIVE" } else { "BYPASSED" })
+                            .color(if is_enabled { Color32::from_rgb(90, 160, 120) } else { Color32::from_rgb(150, 100, 100) })
+                            .size(8.5),
                     );
                 });
             });

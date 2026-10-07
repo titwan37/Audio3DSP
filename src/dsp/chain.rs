@@ -32,6 +32,11 @@ pub struct DspChain {
     reverb: StereoReverb,
     output_gain_linear: f32,
     sample_rate: u32,
+
+    pub widener_enabled: bool,
+    pub haas_enabled: bool,
+    pub reverb_enabled: bool,
+    pub emboss_enabled: bool,
 }
 
 impl DspChain {
@@ -47,6 +52,10 @@ impl DspChain {
             reverb: StereoReverb::new(sample_rate as f64),
             output_gain_linear: 10_f32.powf(DEFAULT_OUTPUT_GAIN_DB / 20.0),
             sample_rate,
+            widener_enabled: true,
+            haas_enabled: true,
+            reverb_enabled: true,
+            emboss_enabled: true,
         }
     }
 
@@ -74,10 +83,11 @@ impl DspChain {
     ///
     /// # Signal Flow:
     /// 1. `(Mid, Side)` Decode from input `(Left, Right)`
-    /// 2. Mid branch: `VocalEmboss` (3 kHz presence EQ boost + soft saturation)
-    /// 3. Side branch: `Side * side_gain` -> `HaasDelay` (3D spatial widening)
+    /// 2. Mid branch: `VocalEmboss` (bypassed if emboss_enabled is false)
+    /// 3. Side branch: `Side * side_gain` (bypassed if widener_enabled is false)
+    ///    -> `HaasDelay` (bypassed if haas_enabled is false)
     /// 4. Re-Matrix: `L_matrix = Mid' + Side'`, `R_matrix = Mid' - Side'`
-    /// 5. Stereo Reverb space wet/dry mix
+    /// 5. Stereo Reverb space wet/dry mix (bypassed if reverb_enabled is false)
     /// 6. Output gain scaling & clipping protection
     #[inline(always)]
     pub fn process_frame(&mut self, left: f32, right: f32) -> (f32, f32) {
@@ -86,18 +96,35 @@ impl DspChain {
         let side = (left - right) * 0.5;
 
         // Stage 2: Vocal "Emboss" Pipeline on Mid (center vocal) Channel
-        let mid_embossed = self.emboss.process(mid);
+        let mid_embossed = if self.emboss_enabled {
+            self.emboss.process(mid)
+        } else {
+            mid
+        };
 
         // Stage 3: Instrumental 3D Widening on Side Channel
-        let side_wide = side * self.side_gain;
-        let side_spatial = self.haas.process(side_wide);
+        let side_wide = if self.widener_enabled {
+            side * self.side_gain
+        } else {
+            side
+        };
+
+        let side_spatial = if self.haas_enabled {
+            self.haas.process(side_wide)
+        } else {
+            side_wide
+        };
 
         // Stage 4: Stereo Re-Matrix
         let l_matrix = mid_embossed + side_spatial;
         let r_matrix = mid_embossed - side_spatial;
 
         // Stage 5: Stereo Reverb Space
-        let (mut l_out, mut r_out) = self.reverb.process(l_matrix, r_matrix);
+        let (mut l_out, mut r_out) = if self.reverb_enabled {
+            self.reverb.process(l_matrix, r_matrix)
+        } else {
+            (l_matrix, r_matrix)
+        };
 
         // Stage 6: Output Gain Compensation & Digital Peak Clipping Protection
         l_out = (l_out * self.output_gain_linear).clamp(-1.0, 1.0);

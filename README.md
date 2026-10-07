@@ -73,19 +73,30 @@ cargo run -- --cli --buffer 1024
 
 ### Console Controls & Parameters
 
-The mixing desk features 4 channel strips and stereo VU meters:
+The mixing desk features 4 channel strips (each equipped with an interactive **ON/OFF Bypass Toggle Switch**) and real-time stereo VU meters:
 
 #### 1. `1: M/S STEREO WIDTH` (`1.0x` to `3.0x`, Default: `2.0x`)
 - **What it does**: Expands the width of background instruments and ambient sounds outward away from your head.
+- **Bypass Toggle (`[ ON ]` / `[OFF]`)**: Hard-bypasses the Side channel gain scaling when toggled OFF.
 
 #### 2. `2: HAAS DELAY` (`0.0 ms` to `40.0 ms`, Default: `10.0 ms`)
 - **What it does**: Applies a micro-timing delay between the left and right ear channels to create a psychoacoustic perception of acoustic space.
+- **Bypass Toggle (`[ ON ]` / `[OFF]`)**: Bypasses the Haas micro-delay line when toggled OFF.
 
 #### 3. `3: SPATIAL REVERB` (`0%` to `100%`, Default: `25%`)
-- **What it does**: Blends a lush simulated room reverb into the 3D space.
+- **What it does**: Blends a lush simulated room reverb into the 3D space using an ultra-low latency Schroeder/Freeverb feedback comb & all-pass diffusion network.
+- **Bypass Toggle (`[ ON ]` / `[OFF]`)**: Bypasses all reverb comb/all-pass computations when toggled OFF.
 
 #### 4. `4: VOCAL EMBOSS` (`0.0 dB` to `+6.0 dB`, Default: `+3.0 dB`)
 - **What it does**: Applies a presence EQ boost and soft saturation exclusively to center lead vocals, making the voice sound crisp, clear, and "embossed" over the music.
+- **Bypass Toggle (`[ ON ]` / `[OFF]`)**: Bypasses the 3 kHz peaking EQ and cubic saturator when toggled OFF.
+
+#### Keyboard Controls (Terminal TUI Mode):
+- `◄ / ►` or `h / l` : Switch focused channel strip.
+- `▲ / ▼` or `+ / -` : Adjust potentiometer value.
+- `Tab` or `▲ / ▼` : Switch focus between slider and bypass switch.
+- `Space` or `Enter` : Toggle module bypass `[ ON ]` / `[OFF]`.
+- `q` or `Esc` : Quit console.
 
 ---
 
@@ -109,7 +120,7 @@ The mixing desk features 4 channel strips and stereo VU meters:
 [ Vocal "Emboss" Pipeline ]              [ Instrumental 3D Widening ]
  ├─ 3 kHz Biquad Peaking EQ (+3 dB)       ├─ Side Gain Multiplier (1.0x - 3.0x)
  └─ Cubic Soft-Clipping Saturator         └─ Haas Micro-Delay Line (0 - 40 ms)
-   │                                             │
+   │  [Bypass: clean Mid passthrough]            │  [Bypass: clean Side passthrough]
    └──────┬──────────────────────────────────────┘
           │
           ▼
@@ -118,7 +129,11 @@ The mixing desk features 4 channel strips and stereo VU meters:
    R_matrix = Mid' - Side'
           │
           ▼
-   [ Stereo Reverb Space (fundsp) ]
+   [ High-Performance Schroeder/Freeverb Spatial Reverb ]
+    ├─ 8 Parallel Low-Pass Feedback Comb Filters (L/R prime tuned)
+    ├─ 4 Cascaded All-Pass Diffusion Filters
+    └─ Anti-Denormal Protection (1e-25 offset)
+    [Bypass: passthrough matrixed L/R]
           │
           ▼
    [ Output Compensation (+3 dB) & Peak Protection ]
@@ -133,12 +148,17 @@ The mixing desk features 4 channel strips and stereo VU meters:
 - **Parametric Peaking EQ**: Transposed Direct Form II Biquad Filter centered at $f_0 = 3000\text{ Hz}$ ($Q = 1.0$) providing $+0.0\text{ dB}$ to $+6.0\text{ dB}$ boost in the vocal presence zone.
 - **Harmonic Exciter / Soft Saturator**: Polynomial cubic curve ($y = x - \frac{x^3}{3}$ for $|x| \le 1.0$) adding subtle odd harmonics to give lead vocals definition over dense instrument mixes.
 
+### High-Performance Spatial Reverb Engine
+- **100% Static Dispatch**: Replaced heavy dynamic trait graph wrappers with fully inlined, static Rust structures—eliminating vtable dynamic dispatch overhead per sample.
+- **Zero-Allocation Delay Lines**: Contiguous pre-allocated circular buffers with power-of-two wrap points or direct modulo indexing for optimal CPU L1 cache line locality.
+- **Anti-Denormal Subnormal Protection**: Injected tiny DC offset ($1.0 \times 10^{-25}$) into feedback comb filter loops to prevent x86 floating-point microcode assist traps during long decay tails.
+
 ### Systems-Level Performance Optimizations
 - **MMCSS Real-Time Thread Priority (`src/main.rs`)**: On startup, `Audio3DSP` invokes Windows `AvSetMmThreadCharacteristicsW("Pro Audio")` via native FFI to elevate the OS thread priority above background processes and prevent scheduler preemptions.
 - **SIMD Hardware Vectorization (`.cargo/config.toml`)**: Configured with `-C target-cpu=native` to allow LLVM to emit AVX2 / FMA SIMD vector instructions, processing multiple audio samples per CPU clock cycle in L1/L2 cache.
 - **Zero Allocations in Callbacks**: All DSP filters, biquads, reverb delay lines, and buffers are pre-allocated at startup.
-- **Thread Synchronization**: Parameter updates between the UI thread and WASAPI audio callback use lock-free atomic float bit-patterns (`AtomicU32` storing `f32::to_bits()`).
-- **Ring Buffer**: Single-Producer Single-Consumer (SPSC) lock-free ring buffer (`ringbuf`) transports incoming audio frames from the capture thread to the playback thread.
+- **Thread Synchronization**: Parameter updates between the UI thread and WASAPI audio callback use lock-free atomic variables (`AtomicU32` bit-packing for floats and `AtomicBool` for bypass toggles) with `Ordering::Relaxed`.
+- **Ring Buffer**: Single-Producer Single-Consumer (SPSC) lock-free ring buffer (`ringbuf`) transports incoming audio frames from the capture thread to the playback thread without locks or mutexes.
 
 ---
 

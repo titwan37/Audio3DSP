@@ -15,6 +15,12 @@ pub struct SharedParams {
     emboss_gain_bits: AtomicU32, // Vocal Emboss Presence Gain (0.0 dB to 6.0 dB)
     rms_left_bits: AtomicU32,    // Live RMS Level Left Channel (0.0 to 1.0)
     rms_right_bits: AtomicU32,   // Live RMS Level Right Channel (0.0 to 1.0)
+
+    // Bypass ON/OFF toggles (lock-free)
+    widener_enabled: std::sync::atomic::AtomicBool,
+    haas_enabled: std::sync::atomic::AtomicBool,
+    reverb_enabled: std::sync::atomic::AtomicBool,
+    emboss_enabled: std::sync::atomic::AtomicBool,
 }
 
 impl SharedParams {
@@ -27,6 +33,11 @@ impl SharedParams {
             emboss_gain_bits: AtomicU32::new(3.0f32.to_bits()),
             rms_left_bits: AtomicU32::new(0.0f32.to_bits()),
             rms_right_bits: AtomicU32::new(0.0f32.to_bits()),
+
+            widener_enabled: std::sync::atomic::AtomicBool::new(true),
+            haas_enabled: std::sync::atomic::AtomicBool::new(true),
+            reverb_enabled: std::sync::atomic::AtomicBool::new(true),
+            emboss_enabled: std::sync::atomic::AtomicBool::new(true),
         })
     }
 
@@ -93,5 +104,73 @@ impl SharedParams {
             .store(left.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
         self.rms_right_bits
             .store(right.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+    }
+
+    /// Check if stereo widener module is enabled (lock-free).
+    #[inline(always)]
+    pub fn is_widener_enabled(&self) -> bool {
+        self.widener_enabled.load(Ordering::Relaxed)
+    }
+
+    /// Toggle stereo widener bypass state.
+    pub fn toggle_widener(&self) -> bool {
+        !self.widener_enabled.fetch_xor(true, Ordering::Relaxed)
+    }
+
+    /// Set stereo widener enabled state.
+    #[allow(dead_code)]
+    pub fn set_widener_enabled(&self, val: bool) {
+        self.widener_enabled.store(val, Ordering::Relaxed);
+    }
+
+    /// Check if Haas delay module is enabled (lock-free).
+    #[inline(always)]
+    pub fn is_haas_enabled(&self) -> bool {
+        self.haas_enabled.load(Ordering::Relaxed)
+    }
+
+    /// Toggle Haas delay bypass state.
+    pub fn toggle_haas(&self) -> bool {
+        !self.haas_enabled.fetch_xor(true, Ordering::Relaxed)
+    }
+
+    /// Set Haas delay enabled state.
+    #[allow(dead_code)]
+    pub fn set_haas_enabled(&self, val: bool) {
+        self.haas_enabled.store(val, Ordering::Relaxed);
+    }
+
+    /// Check if reverb module is enabled (lock-free).
+    #[inline(always)]
+    pub fn is_reverb_enabled(&self) -> bool {
+        self.reverb_enabled.load(Ordering::Relaxed)
+    }
+
+    /// Toggle reverb bypass state.
+    pub fn toggle_reverb(&self) -> bool {
+        !self.reverb_enabled.fetch_xor(true, Ordering::Relaxed)
+    }
+
+    /// Set reverb enabled state.
+    #[allow(dead_code)]
+    pub fn set_reverb_enabled(&self, val: bool) {
+        self.reverb_enabled.store(val, Ordering::Relaxed);
+    }
+
+    /// Check if vocal emboss module is enabled (lock-free).
+    #[inline(always)]
+    pub fn is_emboss_enabled(&self) -> bool {
+        self.emboss_enabled.load(Ordering::Relaxed)
+    }
+
+    /// Toggle vocal emboss bypass state.
+    pub fn toggle_emboss(&self) -> bool {
+        !self.emboss_enabled.fetch_xor(true, Ordering::Relaxed)
+    }
+
+    /// Set vocal emboss enabled state.
+    #[allow(dead_code)]
+    pub fn set_emboss_enabled(&self, val: bool) {
+        self.emboss_enabled.store(val, Ordering::Relaxed);
     }
 }
