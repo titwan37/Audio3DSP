@@ -96,7 +96,7 @@ fn main() -> Result<()> {
     let (mut producer, mut consumer) = ring.split();
 
     // ── Step 6: Build the DSP processing chain ──
-    let mut dsp_chain = dsp::DspChain::new(sample_rate);
+    let mut master_strip = dsp::MasterStrip::new(sample_rate);
 
     // ── Step 7: Build the INPUT stream ──
     let input_stream = input_device
@@ -118,16 +118,34 @@ fn main() -> Result<()> {
             config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                 // Poll atomic parameter updates from UI thread (lock-free)
-                dsp_chain.set_side_gain(audio_shared_params.get_side_gain());
-                dsp_chain.set_haas_delay_ms(audio_shared_params.get_haas_delay_ms());
-                dsp_chain.set_reverb_wet(audio_shared_params.get_reverb_wet());
-                dsp_chain.set_emboss_gain_db(audio_shared_params.get_emboss_gain_db());
+                master_strip.chain.set_side_gain(audio_shared_params.get_side_gain());
+                master_strip.chain.set_haas_delay_ms(audio_shared_params.get_haas_delay_ms());
+                master_strip.chain.set_reverb_wet(audio_shared_params.get_reverb_wet());
+                master_strip.chain.set_emboss_gain_db(audio_shared_params.get_emboss_gain_db());
 
                 // Poll atomic bypass flags (zero allocation, lock-free)
-                dsp_chain.widener_enabled = audio_shared_params.is_widener_enabled();
-                dsp_chain.haas_enabled = audio_shared_params.is_haas_enabled();
-                dsp_chain.reverb_enabled = audio_shared_params.is_reverb_enabled();
-                dsp_chain.emboss_enabled = audio_shared_params.is_emboss_enabled();
+                master_strip.chain.widener_enabled = audio_shared_params.is_widener_enabled();
+                master_strip.chain.haas_enabled = audio_shared_params.is_haas_enabled();
+                master_strip.chain.reverb_enabled = audio_shared_params.is_reverb_enabled();
+                master_strip.chain.emboss_enabled = audio_shared_params.is_emboss_enabled();
+
+                // Poll Pro-Audio parameters (lock-free)
+                master_strip.utility.set_gain_db(audio_shared_params.get_fader_gain_db());
+                master_strip.utility.set_mute(audio_shared_params.is_muted());
+                master_strip.comp.set_threshold(audio_shared_params.get_comp_thresh());
+                master_strip.comp.set_ratio(audio_shared_params.get_comp_ratio());
+                master_strip.comp_enabled = audio_shared_params.is_comp_enabled();
+
+                // Poll Live Venue Simulator parameters (lock-free)
+                master_strip.saturation.set_drive(audio_shared_params.get_saturation_drive());
+                master_strip.saturation.set_mix(audio_shared_params.get_saturation_mix());
+                master_strip.saturation.enabled = audio_shared_params.is_saturation_enabled();
+
+                master_strip.venue_expander.set_sensitivity(audio_shared_params.get_venue_sensitivity());
+                master_strip.venue_expander.enabled = audio_shared_params.is_venue_enabled();
+
+                master_strip.crossfeed.set_mix(audio_shared_params.get_crossfeed_mix());
+                master_strip.crossfeed.enabled = audio_shared_params.is_crossfeed_enabled();
 
                 let mut sum_sq_l = 0.0f32;
                 let mut sum_sq_r = 0.0f32;
@@ -137,7 +155,7 @@ fn main() -> Result<()> {
                     let left_in = consumer.try_pop().unwrap_or(0.0);
                     let right_in = consumer.try_pop().unwrap_or(0.0);
 
-                    let (left_out, right_out) = dsp_chain.process_frame(left_in, right_in);
+                    let (left_out, right_out) = master_strip.process_frame(left_in, right_in);
 
                     sum_sq_l += left_out * left_out;
                     sum_sq_r += right_out * right_out;
@@ -175,9 +193,9 @@ fn main() -> Result<()> {
         println!("[main] Launching eframe Hardware Studio GUI window...");
         let native_options = eframe::NativeOptions {
             viewport: eframe::egui::ViewportBuilder::default()
-                .with_title("Audio3DSP — Hardware Studio Console")
-                .with_inner_size([960.0, 540.0])
-                .with_min_inner_size([640.0, 360.0]), // Set this to the smallest size you want to allow
+                .with_title("Audio3DSP — Live Concert Hardware Studio Console")
+                .with_inner_size([1313.0, 769.0])
+                .with_min_inner_size([840.0, 560.0]),
             ..Default::default()
         };
 

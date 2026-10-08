@@ -30,6 +30,8 @@ pub enum ActiveSlider {
     HaasDelay = 1,
     ReverbWet = 2,
     VocalEmboss = 3,
+    CompThresh = 4, // NEW
+    MasterFader = 5, // NEW    
 }
 
 impl ActiveSlider {
@@ -38,16 +40,20 @@ impl ActiveSlider {
             Self::StereoWidth => Self::HaasDelay,
             Self::HaasDelay => Self::ReverbWet,
             Self::ReverbWet => Self::VocalEmboss,
-            Self::VocalEmboss => Self::StereoWidth,
+            Self::VocalEmboss => Self::CompThresh,
+            Self::CompThresh => Self::MasterFader,
+            Self::MasterFader => Self::StereoWidth,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            Self::StereoWidth => Self::VocalEmboss,
+            Self::StereoWidth => Self::MasterFader,
             Self::HaasDelay => Self::StereoWidth,
             Self::ReverbWet => Self::HaasDelay,
             Self::VocalEmboss => Self::ReverbWet,
+            Self::CompThresh => Self::VocalEmboss,
+            Self::MasterFader => Self::CompThresh,
         }
     }
 }
@@ -140,6 +146,8 @@ impl TuiApp {
                                 ActiveSlider::HaasDelay   => { self.shared_params.toggle_haas(); }
                                 ActiveSlider::ReverbWet   => { self.shared_params.toggle_reverb(); }
                                 ActiveSlider::VocalEmboss => { self.shared_params.toggle_emboss(); }
+                                ActiveSlider::CompThresh  => { self.shared_params.toggle_comp(); }
+                                ActiveSlider::MasterFader => { self.shared_params.toggle_mute(); }
                             }
                         }
                         KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('+') | KeyCode::Char('=') => {
@@ -187,6 +195,16 @@ impl TuiApp {
                 let current = self.shared_params.get_emboss_gain_db();
                 let next = (current + step_direction * 0.2).clamp(0.0, 6.0);
                 self.shared_params.set_emboss_gain_db(next);
+            }
+            ActiveSlider::CompThresh => {
+                let current = self.shared_params.get_comp_thresh();
+                let next = (current + step_direction * 1.0).clamp(-40.0, 0.0);
+                self.shared_params.set_comp_thresh(next);
+            }
+            ActiveSlider::MasterFader => {
+                let current = self.shared_params.get_fader_gain_db();
+                let next = (current + step_direction * 0.5).clamp(-20.0, 6.0);
+                self.shared_params.set_fader_gain_db(next);
             }
         }
     }
@@ -264,10 +282,12 @@ impl TuiApp {
         let strip_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Ratio(1, 4),
-                Constraint::Ratio(1, 4),
-                Constraint::Ratio(1, 4),
-                Constraint::Ratio(1, 4),
+                Constraint::Ratio(1, 6),
+                Constraint::Ratio(1, 6),
+                Constraint::Ratio(1, 6),
+                Constraint::Ratio(1, 6),
+                Constraint::Ratio(1, 6),
+                Constraint::Ratio(1, 6),
             ])
             .split(area);
 
@@ -275,6 +295,9 @@ impl TuiApp {
         let haas = self.shared_params.get_haas_delay_ms();
         let wet = self.shared_params.get_reverb_wet();
         let emboss = self.shared_params.get_emboss_gain_db();
+        let thresh = self.shared_params.get_comp_thresh();
+        let fader = self.shared_params.get_fader_gain_db();
+        let is_unmuted = !self.shared_params.is_muted();
 
         // 1. Stereo Width Slider
         self.render_slider(
@@ -341,6 +364,40 @@ impl TuiApp {
                 is_enabled: self.shared_params.is_emboss_enabled(),
                 focus_elem: self.focus_element,
                 accent_color: Color::Cyan,
+            },
+        );
+
+        // 5. Compressor Threshold Slider
+        self.render_slider(
+            frame,
+            strip_chunks[4],
+            SliderConfig {
+                title: "5: COMP THRESH",
+                val: thresh,
+                min: -40.0,
+                max: 0.0,
+                val_str: format!("{:.0} dB", thresh),
+                is_active: self.active_slider == ActiveSlider::CompThresh,
+                is_enabled: self.shared_params.is_comp_enabled(),
+                focus_elem: self.focus_element,
+                accent_color: Color::Red,
+            },
+        );
+
+        // 6. Master Fader & Mute Slider
+        self.render_slider(
+            frame,
+            strip_chunks[5],
+            SliderConfig {
+                title: "6: MASTER FADER",
+                val: fader,
+                min: -20.0,
+                max: 6.0,
+                val_str: format!("{:.1} dB", fader),
+                is_active: self.active_slider == ActiveSlider::MasterFader,
+                is_enabled: is_unmuted,
+                focus_elem: self.focus_element,
+                accent_color: Color::White,
             },
         );
     }
@@ -502,24 +559,26 @@ impl TuiApp {
         self.render_vu_gauge(frame, chunks[1], "RIGHT [R]", rms_r);
     }
 
-    /// Render a single channel VU gauge with green/yellow/red color thresholds
+    /// Render a single channel VU gauge with green/yellow/red color thresholds and logarithmic dBFS scale
     fn render_vu_gauge(&self, frame: &mut ratatui::Frame, area: Rect, label: &str, rms: f32) {
-        let pct = (rms * 100.0).clamp(0.0, 100.0) as u16;
         let dbfs = if rms > 1e-4 {
             20.0 * rms.log10()
         } else {
             -60.0
         };
 
-        let gauge_color = if pct > 90 {
+        let norm_log = ((dbfs - (-60.0)) / 60.0).clamp(0.0, 1.0);
+        let pct = (norm_log * 100.0).round() as u16;
+
+        let gauge_color = if dbfs >= -6.0 {
             Color::Red
-        } else if pct > 70 {
+        } else if dbfs >= -18.0 {
             Color::Yellow
         } else {
             Color::Green
         };
 
-        let db_str = if dbfs <= -59.0 {
+        let db_str = if dbfs <= -59.5 {
             "-∞ dB".to_string()
         } else {
             format!("{:.1} dB", dbfs)
@@ -533,7 +592,7 @@ impl TuiApp {
                     .border_style(Style::default().fg(Color::DarkGray)),
             )
             .gauge_style(Style::default().fg(gauge_color).bg(Color::Black))
-            .ratio(rms.clamp(0.0, 1.0) as f64)
+            .ratio(norm_log as f64)
             .label(format!("{}%", pct));
 
         frame.render_widget(gauge, area);

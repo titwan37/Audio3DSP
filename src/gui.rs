@@ -124,8 +124,22 @@ impl eframe::App for GuiApp {
             )
             .show(ctx, |ui| {
                 ScrollArea::both().show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        // ── Left Rack: 3 Equal-Width Channel Strips ──
+                    // Calculate responsive sizing based on available window dimensions
+                    let available_w = ui.available_width();
+                    let available_h = ui.available_height();
+
+                    // Master section needs ~365px (VU card 180px + fader ~120px + margins & separators)
+                    let strips_area_w = (available_w - 365.0).max(460.0);
+                    let col_gap = 10.0;
+                    let strip_w = ((strips_area_w - (3.0 * col_gap)) / 4.0).clamp(110.0, 180.0);
+
+                    // Responsive row heights
+                    let extra_h = ((available_h - 580.0) * 0.15).clamp(0.0, 30.0);
+                    let row1_h = 230.0 + extra_h;
+                    let row2_h = 280.0 + extra_h;
+
+                    ui.with_layout(Layout::left_to_right(Align::TOP), |ui| {
+                        // ── Left Rack: 2x4 Channel Strips Table Grid ──
                         ui.vertical(|ui| {
                             ui.heading(
                                 egui::RichText::new("CHANNEL STRIPS")
@@ -135,159 +149,295 @@ impl eframe::App for GuiApp {
                             );
                             ui.add_space(8.0);
 
-                            ui.horizontal(|ui| {
-                                // ── Strip 1: Stereo Width ──
-                                self.render_channel_strip(
-                                    ui,
-                                    "1: M/S WIDTH",
-                                    "STEREO WIDENER",
-                                    Color32::from_rgb(50, 205, 120),
-                                    self.shared_params.is_widener_enabled(),
-                                    || { self.shared_params.toggle_widener(); },
-                                    |ui| {
-                                        let mut val = self.shared_params.get_side_gain();
-                                        let readout = format!("{:.2}x", val);
-                                        if rotary_knob_ui(
-                                            ui,
-                                            &mut val,
-                                            1.0..=3.0,
-                                            "GAIN",
-                                            readout,
-                                            Color32::from_rgb(50, 205, 120),
-                                        ) {
-                                            self.shared_params.set_side_gain(val);
-                                        }
-                                    },
-                                );
+                            egui::Grid::new("channel_strips_grid")
+                                .spacing(Vec2::new(col_gap, 10.0))
+                                .min_col_width(strip_w)
+                                .show(ui, |ui| {
+                                    // ══ ROW 1: Strips 1, 2, 3, 4 ══
 
-                                ui.add_space(10.0);
+                                    // ── Strip 1: Stereo Width ──
+                                    self.render_channel_strip(
+                                        ui,
+                                        "1: M/S WIDTH",
+                                        "STEREO WIDENER",
+                                        Color32::from_rgb(50, 205, 120),
+                                        self.shared_params.is_widener_enabled(),
+                                        strip_w,
+                                        row1_h,
+                                        || { self.shared_params.toggle_widener(); },
+                                        |ui| {
+                                            let mut val = self.shared_params.get_side_gain();
+                                            let readout = format!("{:.2}x", val);
+                                            if rotary_knob_ui(
+                                                ui,
+                                                &mut val,
+                                                1.0..=3.0,
+                                                "GAIN",
+                                                readout,
+                                                Color32::from_rgb(50, 205, 120),
+                                            ) {
+                                                self.shared_params.set_side_gain(val);
+                                            }
+                                        },
+                                    );
 
-                                // ── Strip 2: Haas Delay ──
-                                self.render_channel_strip(
-                                    ui,
-                                    "2: HAAS DELAY",
-                                    "TIMING DELAY",
-                                    Color32::from_rgb(255, 185, 40),
-                                    self.shared_params.is_haas_enabled(),
-                                    || { self.shared_params.toggle_haas(); },
-                                    |ui| {
-                                        let mut val = self.shared_params.get_haas_delay_ms();
-                                        let readout = format!("{:.1} ms", val);
-                                        if rotary_knob_ui(
-                                            ui,
-                                            &mut val,
-                                            0.0..=40.0,
-                                            "TIME",
-                                            readout,
-                                            Color32::from_rgb(255, 185, 40),
-                                        ) {
-                                            self.shared_params.set_haas_delay_ms(val);
-                                        }
-                                    },
-                                );
+                                    // ── Strip 2: Haas Delay ──
+                                    self.render_channel_strip(
+                                        ui,
+                                        "2: HAAS DELAY",
+                                        "TIMING DELAY",
+                                        Color32::from_rgb(255, 185, 40),
+                                        self.shared_params.is_haas_enabled(),
+                                        strip_w,
+                                        row1_h,
+                                        || { self.shared_params.toggle_haas(); },
+                                        |ui| {
+                                            let mut val = self.shared_params.get_haas_delay_ms();
+                                            let readout = format!("{:.1} ms", val);
+                                            if rotary_knob_ui(
+                                                ui,
+                                                &mut val,
+                                                0.0..=40.0,
+                                                "TIME",
+                                                readout,
+                                                Color32::from_rgb(255, 185, 40),
+                                            ) {
+                                                self.shared_params.set_haas_delay_ms(val);
+                                            }
+                                        },
+                                    );
 
-                                ui.add_space(10.0);
+                                    // ── Strip 3: Reverb Wet Mix ──
+                                    self.render_channel_strip(
+                                        ui,
+                                        "3: SPATIAL REVERB",
+                                        "ROOM WET MIX",
+                                        Color32::from_rgb(220, 90, 240),
+                                        self.shared_params.is_reverb_enabled(),
+                                        strip_w,
+                                        row1_h,
+                                        || { self.shared_params.toggle_reverb(); },
+                                        |ui| {
+                                            let mut val = self.shared_params.get_reverb_wet();
+                                            let readout = format!("{:.0}%", val * 100.0);
+                                            if rotary_knob_ui(
+                                                ui,
+                                                &mut val,
+                                                0.0..=1.0,
+                                                "WET MIX",
+                                                readout,
+                                                Color32::from_rgb(220, 90, 240),
+                                            ) {
+                                                self.shared_params.set_reverb_wet(val);
+                                            }
+                                        },
+                                    );
 
-                                // ── Strip 3: Reverb Wet Mix ──
-                                self.render_channel_strip(
-                                    ui,
-                                    "3: SPATIAL REVERB",
-                                    "ROOM WET MIX",
-                                    Color32::from_rgb(220, 90, 240),
-                                    self.shared_params.is_reverb_enabled(),
-                                    || { self.shared_params.toggle_reverb(); },
-                                    |ui| {
-                                        let mut val = self.shared_params.get_reverb_wet();
-                                        let readout = format!("{:.0}%", val * 100.0);
-                                        if rotary_knob_ui(
-                                            ui,
-                                            &mut val,
-                                            0.0..=1.0,
-                                            "WET MIX",
-                                            readout,
-                                            Color32::from_rgb(220, 90, 240),
-                                        ) {
-                                            self.shared_params.set_reverb_wet(val);
-                                        }
-                                    },
-                                );
+                                    // ── Strip 4: Vocal Emboss Presence ──
+                                    self.render_channel_strip(
+                                        ui,
+                                        "4: VOCAL EMBOSS",
+                                        "PRESENCE BOOST",
+                                        Color32::from_rgb(0, 200, 255),
+                                        self.shared_params.is_emboss_enabled(),
+                                        strip_w,
+                                        row1_h,
+                                        || { self.shared_params.toggle_emboss(); },
+                                        |ui| {
+                                            let mut val = self.shared_params.get_emboss_gain_db();
+                                            let readout = format!("+{:.1} dB", val);
+                                            if rotary_knob_ui(
+                                                ui,
+                                                &mut val,
+                                                0.0..=6.0,
+                                                "EMBOSS",
+                                                readout,
+                                                Color32::from_rgb(0, 200, 255),
+                                            ) {
+                                                self.shared_params.set_emboss_gain_db(val);
+                                            }
+                                        },
+                                    );
 
-                                ui.add_space(10.0);
+                                    ui.end_row();
 
-                                // ── Strip 4: Vocal Emboss Presence ──
-                                self.render_channel_strip(
-                                    ui,
-                                    "4: VOCAL EMBOSS",
-                                    "PRESENCE BOOST",
-                                    Color32::from_rgb(0, 200, 255),
-                                    self.shared_params.is_emboss_enabled(),
-                                    || { self.shared_params.toggle_emboss(); },
-                                    |ui| {
-                                        let mut val = self.shared_params.get_emboss_gain_db();
-                                        let readout = format!("+{:.1} dB", val);
-                                        if rotary_knob_ui(
-                                            ui,
-                                            &mut val,
-                                            0.0..=6.0,
-                                            "EMBOSS",
-                                            readout,
-                                            Color32::from_rgb(0, 200, 255),
-                                        ) {
-                                            self.shared_params.set_emboss_gain_db(val);
-                                        }
-                                    },
-                                );
-                            });
+                                    // ══ ROW 2: Strips 5, 6, 7, 8 ══
+
+                                    // ── Strip 5: Dynamics (Compressor) ──
+                                    self.render_channel_strip(
+                                        ui,
+                                        "5: DYNAMICS",
+                                        "STEREO COMP",
+                                        Color32::from_rgb(255, 100, 100),
+                                        self.shared_params.is_comp_enabled(),
+                                        strip_w,
+                                        row2_h,
+                                        || { self.shared_params.toggle_comp(); },
+                                        |ui| {
+                                            let mut thresh = self.shared_params.get_comp_thresh();
+                                            let thresh_readout = format!("{:.0} dB", thresh);
+                                            if rotary_knob_ui(ui, &mut thresh, -40.0..=0.0, "THRESH", thresh_readout, Color32::from_rgb(255, 100, 100)) {
+                                                self.shared_params.set_comp_thresh(thresh);
+                                            }
+                                            let mut ratio = self.shared_params.get_comp_ratio();
+                                            let ratio_readout = format!("{:.1}:1", ratio);
+                                            if rotary_knob_ui(ui, &mut ratio, 1.0..=10.0, "RATIO", ratio_readout, Color32::from_rgb(255, 100, 100)) {
+                                                self.shared_params.set_comp_ratio(ratio);
+                                            }
+                                        },
+                                    );
+
+                                    // ── Strip 6: Analog Console Saturation ──
+                                    self.render_channel_strip(
+                                        ui,
+                                        "6: ANALOG GLUE",
+                                        "CONSOLE TAPE",
+                                        Color32::from_rgb(255, 150, 50),
+                                        self.shared_params.is_saturation_enabled(),
+                                        strip_w,
+                                        row2_h,
+                                        || { self.shared_params.toggle_saturation(); },
+                                        |ui| {
+                                            let mut drive = self.shared_params.get_saturation_drive();
+                                            let drive_readout = format!("{:.1}x", drive);
+                                            if rotary_knob_ui(ui, &mut drive, 0.5..=4.0, "DRIVE", drive_readout, Color32::from_rgb(255, 150, 50)) {
+                                                self.shared_params.set_saturation_drive(drive);
+                                            }
+                                            let mut mix = self.shared_params.get_saturation_mix();
+                                            let mix_readout = format!("{:.0}%", mix * 100.0);
+                                            if rotary_knob_ui(ui, &mut mix, 0.0..=1.0, "MIX", mix_readout, Color32::from_rgb(255, 150, 50)) {
+                                                self.shared_params.set_saturation_mix(mix);
+                                            }
+                                        },
+                                    );
+
+                                    // ── Strip 7: Dynamic Venue Expander ──
+                                    self.render_channel_strip(
+                                        ui,
+                                        "7: VENUE BLOOM",
+                                        "ROOM EXPANDER",
+                                        Color32::from_rgb(180, 100, 255),
+                                        self.shared_params.is_venue_enabled(),
+                                        strip_w,
+                                        row2_h,
+                                        || { self.shared_params.toggle_venue(); },
+                                        |ui| {
+                                            let mut sens = self.shared_params.get_venue_sensitivity();
+                                            let sens_readout = format!("{:.2}", sens);
+                                            if rotary_knob_ui(ui, &mut sens, 0.0..=2.0, "SENS", sens_readout, Color32::from_rgb(180, 100, 255)) {
+                                                self.shared_params.set_venue_sensitivity(sens);
+                                            }
+                                        },
+                                    );
+
+                                    // ── Strip 8: Headphone Crossfeed ──
+                                    self.render_channel_strip(
+                                        ui,
+                                        "8: PA CROSSFEED",
+                                        "HEADPHONE HRTF",
+                                        Color32::from_rgb(60, 180, 240),
+                                        self.shared_params.is_crossfeed_enabled(),
+                                        strip_w,
+                                        row2_h,
+                                        || { self.shared_params.toggle_crossfeed(); },
+                                        |ui| {
+                                            let mut mix = self.shared_params.get_crossfeed_mix();
+                                            let mix_readout = format!("{:.0}%", mix * 100.0);
+                                            if rotary_knob_ui(ui, &mut mix, 0.0..=1.0, "FEED", mix_readout, Color32::from_rgb(60, 180, 240)) {
+                                                self.shared_params.set_crossfeed_mix(mix);
+                                            }
+                                        },
+                                    );
+
+                                    ui.end_row();
+                                });
                         });
 
-                        ui.add_space(20.0);
+                        ui.add_space(16.0);
                         ui.separator();
                         ui.add_space(16.0);
 
-                        // ── Right Rack: Compact Master Stereo VU Meters Card ──
-                        ui.vertical(|ui| {
-                            ui.heading(
-                                egui::RichText::new("MASTER METERS")
-                                    .color(Color32::from_rgb(200, 210, 220))
-                                    .size(13.0)
-                                    .strong(),
-                            );
-                            ui.add_space(8.0);
+                        // ── Right Rack: Master VU Meters Card & Master Fader ──
+                        ui.scope(|ui| {
+                            ui.set_min_width(320.0);
+                            ui.vertical(|ui| {
+                                ui.heading(
+                                    egui::RichText::new("MASTER VU METERS")
+                                        .color(Color32::from_rgb(200, 210, 220))
+                                        .size(13.0)
+                                        .strong(),
+                                );
+                                ui.add_space(8.0);
 
-                            Frame::none()
-                                .fill(Color32::from_rgb(14, 16, 20))
-                                .stroke(Stroke::new(1.0, Color32::from_rgb(45, 50, 60)))
-                                .rounding(Rounding::same(6.0))
-                                .inner_margin(Margin::same(14.0))
-                                .show(ui, |ui| {
-                                    // Match the height of the channel strips (230px)
-                                    ui.set_width(140.0);
-                                    ui.set_height(230.0);
+                                // Dynamic height calculated to match or exceed the 2-row channel strip grid
+                                let min_grid_h = row1_h + row2_h + 10.0;
+                                let dynamic_card_h = (available_h - 16.0).clamp(min_grid_h, 800.0);
+                                let meter_h = (dynamic_card_h - 60.0).clamp(180.0, 740.0);
 
-                                    ui.horizontal(|ui| {
-                                        ui.add_space(6.0);
+                                ui.with_layout(Layout::left_to_right(Align::TOP), |ui| {
+                                    Frame::none()
+                                        .fill(Color32::from_rgb(14, 16, 20))
+                                        .stroke(Stroke::new(1.0, Color32::from_rgb(45, 50, 60)))
+                                        .rounding(Rounding::same(6.0))
+                                        .inner_margin(Margin::same(12.0))
+                                        .show(ui, |ui| {
+                                            ui.set_min_width(180.0);
+                                            ui.set_min_height(dynamic_card_h);
 
-                                        // Left Meter Column (74px wide)
-                                        ui.allocate_ui_with_layout(
-                                            Vec2::new(74.0, 230.0),
-                                            Layout::top_down(Align::Center),
-                                            |ui| {
-                                                vertical_vu_meter_ui(ui, "LEFT [L]", rms_l, self.peak_left);
-                                            },
-                                        );
+                                            ui.with_layout(Layout::left_to_right(Align::TOP), |ui| {
+                                                ui.add_space(2.0);
 
-                                        ui.add_space(8.0);
+                                                // Left Meter Column
+                                                ui.allocate_ui_with_layout(
+                                                    Vec2::new(60.0, dynamic_card_h - 24.0),
+                                                    Layout::top_down(Align::Center),
+                                                    |ui| {
+                                                        vertical_vu_meter_ui(ui, "LEFT [L]", rms_l, self.peak_left, meter_h);
+                                                    },
+                                                );
 
-                                        // Right Meter Column (74px wide)
-                                        ui.allocate_ui_with_layout(
-                                            Vec2::new(74.0, 230.0),
-                                            Layout::top_down(Align::Center),
-                                            |ui| {
-                                                vertical_vu_meter_ui(ui, "RIGHT [R]", rms_r, self.peak_right);
-                                            },
-                                        );
-                                    });
+                                                // Center calibrated dB scale
+                                                ui.allocate_ui_with_layout(
+                                                    Vec2::new(28.0, dynamic_card_h - 24.0),
+                                                    Layout::top_down(Align::Center),
+                                                    |ui| {
+                                                        db_scale_ui(ui, meter_h);
+                                                    },
+                                                );
+
+                                                // Right Meter Column
+                                                ui.allocate_ui_with_layout(
+                                                    Vec2::new(60.0, dynamic_card_h - 24.0),
+                                                    Layout::top_down(Align::Center),
+                                                    |ui| {
+                                                        vertical_vu_meter_ui(ui, "RIGHT [R]", rms_r, self.peak_right, meter_h);
+                                                    },
+                                                );
+                                            });
+                                        });
+
+                                    ui.add_space(10.0);
+
+                                    // ── Master Fader & Mute ──
+                                    self.render_channel_strip(
+                                        ui,
+                                        "MASTER",
+                                        "FADER / MUTE",
+                                        Color32::from_rgb(220, 220, 220),
+                                        !self.shared_params.is_muted(),
+                                        strip_w.min(130.0),
+                                        row1_h,
+                                        || { self.shared_params.toggle_mute(); },
+                                        |ui| {
+                                            let mut fader = self.shared_params.get_fader_gain_db();
+                                            let fader_readout = format!("{:.1} dB", fader);
+                                            if rotary_knob_ui(ui, &mut fader, -20.0..=6.0, "GAIN", fader_readout, Color32::WHITE) {
+                                                self.shared_params.set_fader_gain_db(fader);
+                                            }
+                                        },
+                                    );
                                 });
+                            });
                         });
                     });
                 });
@@ -303,6 +453,8 @@ impl GuiApp {
         subtitle: &str,
         accent: Color32,
         is_enabled: bool,
+        strip_w: f32,
+        min_h: f32,
         on_toggle: impl FnOnce(),
         add_knob: impl FnOnce(&mut egui::Ui),
     ) {
@@ -312,9 +464,10 @@ impl GuiApp {
             .rounding(Rounding::same(6.0))
             .inner_margin(Margin::same(12.0))
             .show(ui, |ui| {
-                // Channel strip fixed size
-                ui.set_width(110.0);
-                ui.set_height(230.0);
+                // Responsive channel strip size
+                ui.set_width(strip_w);
+                ui.set_min_width(strip_w);
+                ui.set_min_height(min_h);
                 ui.vertical_centered(|ui| {
                     ui.label(
                         egui::RichText::new(title)
@@ -358,7 +511,8 @@ impl GuiApp {
                     .stroke(Stroke::new(1.5, border_color))
                     .rounding(Rounding::same(4.0));
 
-                    if ui.add_sized([70.0, 24.0], toggle_btn).clicked() {
+                    let btn_w = (strip_w - 20.0).clamp(70.0, 100.0);
+                    if ui.add_sized([btn_w, 24.0], toggle_btn).clicked() {
                         on_toggle();
                     }
 
@@ -452,8 +606,70 @@ fn rotary_knob_ui(
     changed
 }
 
-/// Custom Vertical Master Stereo VU Meter widget
-fn vertical_vu_meter_ui(ui: &mut egui::Ui, label: &str, rms: f32, peak: f32) {
+/// Maps linear amplitude (0.0 to 1.0+) to normalized meter height (0.0 to 1.0) on a -60 dBFS to 0 dBFS scale.
+#[inline(always)]
+fn amplitude_to_db_norm(amp: f32) -> f32 {
+    const MIN_DB: f32 = -60.0;
+    const MAX_DB: f32 = 0.0;
+    if amp <= 1e-4 {
+        0.0
+    } else {
+        let db = 20.0 * amp.log10();
+        ((db - MIN_DB) / (MAX_DB - MIN_DB)).clamp(0.0, 1.0)
+    }
+}
+
+/// Centered calibrated dBFS scale markings aligned with the VU meters
+fn db_scale_ui(ui: &mut egui::Ui, meter_height: f32) {
+    ui.vertical_centered(|ui| {
+        // Space matching label above meters ("LEFT [L]" is ~14px + 4px space)
+        ui.add_space(18.0);
+
+        let width = 28.0;
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(width, meter_height), Sense::hover());
+        if ui.is_rect_visible(rect) {
+            let painter = ui.painter();
+            let ticks: [(f32, &str, Color32); 8] = [
+                (0.0, "0", Color32::from_rgb(255, 80, 80)),
+                (-6.0, "-6", Color32::from_rgb(255, 140, 60)),
+                (-12.0, "-12", Color32::from_rgb(255, 200, 40)),
+                (-18.0, "-18", Color32::from_rgb(240, 215, 60)),
+                (-24.0, "-24", Color32::from_rgb(120, 200, 140)),
+                (-36.0, "-36", Color32::from_rgb(90, 170, 120)),
+                (-48.0, "-48", Color32::from_rgb(70, 130, 100)),
+                (-60.0, "-∞", Color32::from_rgb(100, 110, 125)),
+            ];
+
+            let inner_rect = rect.shrink(3.0);
+            for (db, label_str, color) in ticks {
+                let norm = ((db - (-60.0)) / 60.0).clamp(0.0, 1.0);
+                let y = inner_rect.max.y - norm * inner_rect.height();
+
+                painter.line_segment(
+                    [Pos2::new(rect.min.x, y), Pos2::new(rect.min.x + 3.0, y)],
+                    Stroke::new(1.0, Color32::from_rgb(80, 85, 100)),
+                );
+                painter.line_segment(
+                    [Pos2::new(rect.max.x - 3.0, y), Pos2::new(rect.max.x, y)],
+                    Stroke::new(1.0, Color32::from_rgb(80, 85, 100)),
+                );
+
+                painter.text(
+                    Pos2::new(rect.center().x, y),
+                    Align2::CENTER_CENTER,
+                    label_str,
+                    egui::FontId::proportional(8.5),
+                    color,
+                );
+            }
+        }
+
+        ui.add_space(18.0);
+    });
+}
+
+/// Custom Vertical Master Stereo VU Meter widget with dynamic height and logarithmic dBFS scaling
+fn vertical_vu_meter_ui(ui: &mut egui::Ui, label: &str, rms: f32, peak: f32, meter_height: f32) {
     ui.vertical_centered(|ui| {
         // Label above meter
         ui.label(
@@ -464,9 +680,8 @@ fn vertical_vu_meter_ui(ui: &mut egui::Ui, label: &str, rms: f32, peak: f32) {
         );
         ui.add_space(4.0);
 
-        let width = 36.0;
-        let height = 175.0;
-        let (rect, _response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
+        let width = 34.0;
+        let (rect, _response) = ui.allocate_exact_size(Vec2::new(width, meter_height), Sense::hover());
 
         if ui.is_rect_visible(rect) {
             let painter = ui.painter();
@@ -476,25 +691,30 @@ fn vertical_vu_meter_ui(ui: &mut egui::Ui, label: &str, rms: f32, peak: f32) {
             painter.rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_rgb(40, 45, 55)));
 
             let inner_rect = rect.shrink(3.0);
-            let num_segments = 22;
+            let num_segments = ((meter_height / 7.5).round() as usize).clamp(20, 80);
             let seg_height = inner_rect.height() / num_segments as f32;
 
-            let active_rms_segs = (rms.clamp(0.0, 1.0) * num_segments as f32).round() as usize;
-            let active_peak_seg = (peak.clamp(0.0, 1.0) * num_segments as f32).round() as usize;
+            // Logarithmic dBFS scale mapping (-60 dBFS to 0 dBFS)
+            let active_rms_norm = amplitude_to_db_norm(rms);
+            let active_peak_norm = amplitude_to_db_norm(peak);
+
+            let active_rms_segs = (active_rms_norm * num_segments as f32).round() as usize;
+            let active_peak_seg = (active_peak_norm * num_segments as f32).round() as usize;
 
             for i in 0..num_segments {
                 let y_bottom = inner_rect.max.y - (i as f32 * seg_height);
-                let y_top = y_bottom - (seg_height - 1.5);
+                let y_top = (y_bottom - (seg_height - 1.5)).max(inner_rect.min.y);
                 let seg_rect = Rect::from_min_max(
                     Pos2::new(inner_rect.min.x, y_top),
                     Pos2::new(inner_rect.max.x, y_bottom),
                 );
 
-                let pct = (i as f32 / num_segments as f32) * 100.0;
+                let seg_pct = (i as f32 + 0.5) / num_segments as f32;
+                let seg_db = -60.0 + seg_pct * 60.0;
 
-                let seg_color = if pct > 90.0 {
+                let seg_color = if seg_db >= -6.0 {
                     Color32::from_rgb(255, 60, 60)
-                } else if pct > 70.0 {
+                } else if seg_db >= -18.0 {
                     Color32::from_rgb(255, 200, 40)
                 } else {
                     Color32::from_rgb(50, 210, 100)
@@ -503,7 +723,7 @@ fn vertical_vu_meter_ui(ui: &mut egui::Ui, label: &str, rms: f32, peak: f32) {
                 if i < active_rms_segs {
                     painter.rect_filled(seg_rect, 1.0, seg_color);
                 } else {
-                    painter.rect_filled(seg_rect, 1.0, Color32::from_rgb(22, 26, 34));
+                    painter.rect_filled(seg_rect, 1.0, Color32::from_rgb(20, 24, 30));
                 }
 
                 if i + 1 == active_peak_seg && active_peak_seg > 0 {
@@ -520,10 +740,10 @@ fn vertical_vu_meter_ui(ui: &mut egui::Ui, label: &str, rms: f32, peak: f32) {
         } else {
             -60.0
         };
-        let db_str = if dbfs <= -59.0 {
+        let db_str = if dbfs <= -59.5 {
             "-∞ dB".to_string()
         } else {
-            format!("{:.1}dB", dbfs)
+            format!("{:.1} dB", dbfs)
         };
 
         ui.label(
@@ -533,7 +753,8 @@ fn vertical_vu_meter_ui(ui: &mut egui::Ui, label: &str, rms: f32, peak: f32) {
                 } else {
                     Color32::from_rgb(0, 200, 240)
                 })
-                .size(11.0)
+                .size(10.0)
+                .monospace()
                 .strong(),
         );
     });
